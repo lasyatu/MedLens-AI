@@ -1,0 +1,199 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation helper for User Profile document
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'displayName', 'preferredJurisdiction', 'createdAt', 'updatedAt'])
+        && data.email is string && data.email.size() <= 256
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100))
+        && (!('preferredJurisdiction' in data) || (data.preferredJurisdiction is string && data.preferredJurisdiction.size() <= 50))
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && data.updatedAt is string && data.updatedAt.size() <= 100;
+    }
+
+    // Validation helper for Scan document
+    function isValidScan(data, expectedUserId) {
+      return data.keys().hasAll(['userId', 'medicineName', 'extractedText', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId == expectedUserId
+        && data.medicineName is string && data.medicineName.size() > 0 && data.medicineName.size() <= 200
+        && (!('genericName' in data) || (data.genericName is string && data.genericName.size() <= 200))
+        && (!('brandName' in data) || (data.brandName is string && data.brandName.size() <= 200))
+        && (!('dosage' in data) || (data.dosage is string && data.dosage.size() <= 100))
+        && (!('jurisdiction' in data) || (data.jurisdiction is string && data.jurisdiction.size() <= 50))
+        && data.extractedText is string && data.extractedText.size() <= 10000
+        && (!('summary' in data) || (data.summary is string && data.summary.size() <= 5000))
+        && (!('confidenceScore' in data) || (data.confidenceScore is number))
+        && (!('uses' in data) || (data.uses is list && data.uses.size() <= 100))
+        && (!('warnings' in data) || (data.warnings is list && data.warnings.size() <= 100))
+        && (!('precautions' in data) || (data.precautions is list && data.precautions.size() <= 100))
+        && (!('sources' in data) || (data.sources is list && data.sources.size() <= 50))
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && data.updatedAt is string && data.updatedAt.size() <= 100;
+    }
+
+    // Validation helper for MedicalReport document
+    function isValidReport(data, expectedUserId) {
+      return data.keys().hasAll(['userId', 'reportTitle', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId == expectedUserId
+        && data.reportTitle is string && data.reportTitle.size() > 0 && data.reportTitle.size() <= 200
+        && (!('reportDate' in data) || (data.reportDate is string && data.reportDate.size() <= 100))
+        && (!('extractedText' in data) || (data.extractedText is string && data.extractedText.size() <= 20000))
+        && (!('testResults' in data) || (data.testResults is list && data.testResults.size() <= 100))
+        && (!('summary' in data) || (data.summary is string && data.summary.size() <= 5000))
+        && (!('consentToStore' in data) || (data.consentToStore is bool))
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && data.updatedAt is string && data.updatedAt.size() <= 100;
+    }
+
+    // Validation helper for ChatMessage document
+    function isValidChat(data, expectedUserId) {
+      return data.keys().hasAll(['userId', 'role', 'content', 'createdAt'])
+        && data.userId is string && data.userId == expectedUserId
+        && data.role is string && (data.role == 'user' || data.role == 'assistant' || data.role == 'model')
+        && data.content is string && data.content.size() <= 10000
+        && (!('language' in data) || (data.language is string && data.language.size() <= 10))
+        && (!('attachedContext' in data) || (data.attachedContext is string && data.attachedContext.size() <= 200))
+        && data.createdAt is string && data.createdAt.size() <= 100;
+    }
+
+    // Validation helper for ScanFeedback document
+    function isValidFeedback(data, expectedUserId) {
+      return data.keys().hasAll(['userId', 'medicineName', 'accuracyRating', 'helpfulnessRating', 'status', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId == expectedUserId
+        && data.medicineName is string && data.medicineName.size() > 0 && data.medicineName.size() <= 200
+        && (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 256))
+        && (!('scanId' in data) || (data.scanId is string && data.scanId.size() <= 128))
+        && data.accuracyRating is number && data.accuracyRating >= 1 && data.accuracyRating <= 5
+        && data.helpfulnessRating is number && data.helpfulnessRating >= 1 && data.helpfulnessRating <= 5
+        && (!('feedbackCategory' in data) || (data.feedbackCategory is string && data.feedbackCategory.size() <= 50))
+        && (!('comment' in data) || (data.comment is string && data.comment.size() <= 2000))
+        && (!('confidenceScore' in data) || (data.confidenceScore is number))
+        && (!('jurisdiction' in data) || (data.jurisdiction is string && data.jurisdiction.size() <= 50))
+        && data.status is string && (data.status == 'new' || data.status == 'reviewed' || data.status == 'resolved')
+        && (!('developerNotes' in data) || (data.developerNotes is string && data.developerNotes.size() <= 2000))
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && data.updatedAt is string && data.updatedAt.size() <= 100;
+    }
+
+    // Validation helper for MedicationSchedule document
+    function isValidSchedule(data, expectedUserId) {
+      return data.keys().hasAll(['userId', 'medicineName', 'dosage', 'frequency', 'times', 'isActive', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId == expectedUserId
+        && data.medicineName is string && data.medicineName.size() > 0 && data.medicineName.size() <= 200
+        && data.dosage is string && data.dosage.size() <= 100
+        && (!('dosageForm' in data) || (data.dosageForm is string && data.dosageForm.size() <= 100))
+        && data.frequency is string && (data.frequency == 'daily' || data.frequency == 'weekly' || data.frequency == 'as_needed')
+        && data.times is list && data.times.size() > 0 && data.times.size() <= 20
+        && (!('daysOfWeek' in data) || (data.daysOfWeek is list && data.daysOfWeek.size() <= 7))
+        && (!('mealTiming' in data) || (data.mealTiming is string && data.mealTiming.size() <= 50))
+        && (!('startDate' in data) || (data.startDate is string && data.startDate.size() <= 50))
+        && (!('endDate' in data) || (data.endDate is string && data.endDate.size() <= 50))
+        && (!('instructions' in data) || (data.instructions is string && data.instructions.size() <= 1000))
+        && data.isActive is bool
+        && (!('lastTakenAt' in data) || (data.lastTakenAt is string && data.lastTakenAt.size() <= 100))
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && data.updatedAt is string && data.updatedAt.size() <= 100;
+    }
+
+    // User profile matching
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false; // Users cannot list other user profiles
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming())
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // Scans subcollection
+      match /scans/{scanId} {
+        allow get: if isOwner(userId) && isValidId(scanId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(scanId)
+          && isValidScan(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(scanId)
+          && isValidScan(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(scanId);
+      }
+
+      // Reports subcollection
+      match /reports/{reportId} {
+        allow get: if isOwner(userId) && isValidId(reportId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(reportId)
+          && isValidReport(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(reportId)
+          && isValidReport(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(reportId);
+      }
+
+      // Chat history subcollection
+      match /chats/{chatId} {
+        allow get: if isOwner(userId) && isValidId(chatId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(chatId)
+          && isValidChat(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(chatId)
+          && isValidChat(incoming(), userId)
+          && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(chatId);
+      }
+
+      // Feedback subcollection
+      match /feedback/{feedbackId} {
+        allow get: if isOwner(userId) && isValidId(feedbackId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(feedbackId)
+          && isValidFeedback(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(feedbackId)
+          && isValidFeedback(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(feedbackId);
+      }
+
+      // Schedules subcollection
+      match /schedules/{scheduleId} {
+        allow get: if isOwner(userId) && isValidId(scheduleId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(scheduleId)
+          && isValidSchedule(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(scheduleId)
+          && isValidSchedule(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(scheduleId);
+      }
+    }
+  }
+}

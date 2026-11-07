@@ -1,0 +1,142 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "preferredJurisdiction": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["email", "createdAt", "updatedAt"]
+    },
+    "Scan": {
+      "title": "Scan",
+      "description": "Medicine scan record with extracted text, verified identity, uses, warnings, and citations",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "medicineName": { "type": "string", "maxLength": 200 },
+        "genericName": { "type": "string", "maxLength": 200 },
+        "brandName": { "type": "string", "maxLength": 200 },
+        "dosage": { "type": "string", "maxLength": 100 },
+        "jurisdiction": { "type": "string", "maxLength": 50 },
+        "extractedText": { "type": "string", "maxLength": 10000 },
+        "summary": { "type": "string", "maxLength": 5000 },
+        "uses": { "type": "array" },
+        "warnings": { "type": "array" },
+        "precautions": { "type": "array" },
+        "sources": { "type": "array" },
+        "confidenceScore": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "medicineName", "extractedText", "createdAt", "updatedAt"]
+    },
+    "MedicalReport": {
+      "title": "MedicalReport",
+      "description": "User laboratory or diagnostic report with extracted test metrics and educational analysis",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "reportTitle": { "type": "string", "maxLength": 200 },
+        "reportDate": { "type": "string", "maxLength": 100 },
+        "extractedText": { "type": "string", "maxLength": 20000 },
+        "testResults": { "type": "array" },
+        "summary": { "type": "string", "maxLength": 5000 },
+        "consentToStore": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "reportTitle", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "User chat conversation record with MedLens AI bilingual assistant",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "maxLength": 20 },
+        "content": { "type": "string", "maxLength": 10000 },
+        "language": { "type": "string", "maxLength": 10 },
+        "attachedContext": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "role", "content", "createdAt"]
+    },
+    "ScanFeedback": {
+      "title": "ScanFeedback",
+      "description": "User rating and feedback comments on scan accuracy and explanation helpfulness",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "scanId": { "type": "string", "maxLength": 128 },
+        "medicineName": { "type": "string", "maxLength": 200 },
+        "accuracyRating": { "type": "number" },
+        "helpfulnessRating": { "type": "number" },
+        "feedbackCategory": { "type": "string", "maxLength": 50 },
+        "comment": { "type": "string", "maxLength": 2000 },
+        "confidenceScore": { "type": "number" },
+        "jurisdiction": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "developerNotes": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "medicineName", "accuracyRating", "helpfulnessRating", "status", "createdAt", "updatedAt"]
+    },
+    "MedicationSchedule": {
+      "title": "MedicationSchedule",
+      "description": "Daily or weekly reminder schedule for medicine intake with dose times and meal instructions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "medicineName": { "type": "string", "maxLength": 200 },
+        "dosage": { "type": "string", "maxLength": 100 },
+        "dosageForm": { "type": "string", "maxLength": 100 },
+        "frequency": { "type": "string", "maxLength": 50 },
+        "times": { "type": "array" },
+        "daysOfWeek": { "type": "array" },
+        "mealTiming": { "type": "string", "maxLength": 50 },
+        "startDate": { "type": "string", "maxLength": 50 },
+        "endDate": { "type": "string", "maxLength": 50 },
+        "instructions": { "type": "string", "maxLength": 1000 },
+        "isActive": { "type": "boolean" },
+        "lastTakenAt": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "medicineName", "dosage", "frequency", "times", "isActive", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document storing settings and preferences"
+    },
+    "/users/{userId}/scans/{scanId}": {
+      "schema": "Scan",
+      "description": "Medicine scan records belonging exclusively to the user"
+    },
+    "/users/{userId}/reports/{reportId}": {
+      "schema": "MedicalReport",
+      "description": "Laboratory reports and diagnostic results belonging exclusively to the user"
+    },
+    "/users/{userId}/chats/{chatId}": {
+      "schema": "ChatMessage",
+      "description": "Chat messages and bilingual consultations belonging exclusively to the user"
+    },
+    "/users/{userId}/feedback/{feedbackId}": {
+      "schema": "ScanFeedback",
+      "description": "Accuracy and helpfulness ratings submitted by the user"
+    },
+    "/users/{userId}/schedules/{scheduleId}": {
+      "schema": "MedicationSchedule",
+      "description": "Medication reminders and intake schedules belonging exclusively to the user"
+    }
+  }
+}
