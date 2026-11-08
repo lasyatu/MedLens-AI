@@ -24,7 +24,7 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { LandingPage } from './components/LandingPage';
 import { Dashboard } from './components/Dashboard';
 import { MedicineScanner } from './components/MedicineScanner';
-import { MedicineResults } from './components/MedicineResults';
+import { MedicineResults, ActiveScanData } from './components/MedicineResults';
 import { ReportAnalyzer } from './components/ReportAnalyzer';
 import { AIChatbot } from './components/AIChatbot';
 import { HealthGuidance } from './components/HealthGuidance';
@@ -61,16 +61,7 @@ function MainApp() {
   const [loadingRecords, setLoadingRecords] = useState(false);
 
   // Active scan result for display
-  const [activeScanData, setActiveScanData] = useState<{
-    rawText: string;
-    confirmedMedicine: string;
-    genericName?: string;
-    dosage?: string;
-    dosageForm?: string;
-    confidenceScore: number;
-    jurisdiction?: string;
-    preprocessedImageBase64?: string;
-  } | null>(null);
+  const [activeScanData, setActiveScanData] = useState<ActiveScanData | null>(null);
 
   // Chat context forwarding
   const [chatAttachedScan, setChatAttachedScan] = useState<string | undefined>(undefined);
@@ -151,16 +142,7 @@ function MainApp() {
   };
 
   // Handle completed scan from scanner
-  const handleScanComplete = (scanResult: {
-    rawText: string;
-    confirmedMedicine: string;
-    genericName?: string;
-    dosage?: string;
-    dosageForm?: string;
-    confidenceScore: number;
-    jurisdiction?: string;
-    preprocessedImageBase64?: string;
-  }) => {
+  const handleScanComplete = (scanResult: ActiveScanData) => {
     setActiveScanData(scanResult);
     setCurrentView('results');
   };
@@ -289,6 +271,14 @@ function MainApp() {
             language={language}
             onBackToScan={() => setCurrentView('scan')}
             onScanSaved={loadUserRecords}
+            onConsultDhanvi={(medicineContext) => {
+              setDhanviContext(medicineContext);
+              setDhanviIsGeneral(false);
+              setCurrentView('dhanvi');
+            }}
+            onOpenComparison={() => {
+              setCurrentView('interactions');
+            }}
           />
         )}
 

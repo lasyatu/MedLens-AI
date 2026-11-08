@@ -28,27 +28,55 @@ if (geminiApiKey && geminiApiKey !== 'MY_GEMINI_API_KEY') {
 }
 
 /**
- * Handle OCR extraction from preprocessed label image
+ * Handle OCR and multimodal medicine extraction from packaging or prescription image
  */
 export async function handleOCR(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<{
   rawExtractedText: string;
   identifiedName: string | null;
+  brandName: string | null;
+  genericName: string | null;
+  activeIngredients: string[];
+  composition: string | null;
+  strength: string | null;
   dosage: string | null;
   dosageForm: string | null;
+  manufacturer: string | null;
+  expiryDate: string | null;
   confidenceScore: number;
   isCertain: boolean;
   rejectionReason?: string;
+  uncertaintyReason?: string;
   candidateTokens: string[];
   matchedRecord?: any;
 }> {
   let extractedRawText = '';
+  let aiStructured: any = null;
 
   // Clean base64 string
   const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
 
-  if (aiClient) {
+  if (aiClient && cleanBase64.length > 50) {
     try {
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000));
+      const prompt = `You are a strict, regulatory pharmaceutical packaging and prescription reader for MedLens AI.
+Analyze this medicine image (strip, box, bottle, label, or prescription).
+Extract verified printed information into a strict JSON object with NO invented information:
+{
+  "rawExtractedText": "verbatim all visible lines of text separated by newlines",
+  "brandName": "Brand/Trade name if visible, or null",
+  "genericName": "Generic / active chemical name if visible, or null",
+  "activeIngredients": ["list of active chemical entities"],
+  "composition": "full composition string if visible, or null",
+  "strength": "strength/dose e.g. 500 mg, or null",
+  "dosageForm": "Tablet, Capsule, Syrup, Suspension, etc., or null",
+  "manufacturer": "Manufacturer name if visible, or null",
+  "expiryDate": "Expiry date if visible, or null",
+  "confidenceScore": 0.0 to 1.0 based on image legibility and clarity,
+  "isCertain": true if the medicine identity and strength are unmistakably readable and verifiable; false if blurry, cropped, ambiguous, or generic-only without drug name,
+  "uncertaintyReason": "If isCertain is false, state why (e.g. Active ingredient name cropped, blurry text, low lighting glare, generic packaging without drug name)"
+}
+Return ONLY the raw JSON object. Do not include markdown code fences or conversational text.`;
+
       const ocrCall = aiClient.models.generateContent({
         model: 'gemini-3.8-flash',
         contents: [
@@ -61,7 +89,7 @@ export async function handleOCR(imageBase64: string, mimeType: string = 'image/j
                 }
               },
               {
-                text: 'You are an OCR and medicine label reader. Extract ALL readable printed text on this medicine package or label verbatim. Return ONLY the extracted text lines. Include brand name, generic/chemical name, dosage strength (e.g. 500mg), dosage form (tablet, capsule, syrup), manufacturer, warnings, and batch/exp if visible. Do not add commentary.'
+                text: prompt
               }
             ]
           }
@@ -70,33 +98,78 @@ export async function handleOCR(imageBase64: string, mimeType: string = 'image/j
 
       const response: any = await Promise.race([ocrCall, timeoutPromise]);
       if (response && response.text) {
-        extractedRawText = response.text;
+        const rawResponse = response.text.trim();
+        const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            aiStructured = JSON.parse(jsonMatch[0]);
+            extractedRawText = aiStructured.rawExtractedText || '';
+          } catch (e) {
+            extractedRawText = rawResponse;
+          }
+        } else {
+          extractedRawText = rawResponse;
+        }
       }
     } catch (err) {
       console.warn('Gemini OCR API note:', err);
     }
   }
 
-  // If Gemini wasn't available or returned empty, provide robust OCR parsing
-  if (!extractedRawText || extractedRawText.trim().length === 0) {
-    // Check if base64 contains metadata or preset hint
-    extractedRawText = 'Paracetamol Tablets IP 500 mg\nManufactured by Apex Healthcare Ltd\nStore below 30°C in a dry place\nWarning: Overdose may cause severe liver damage.';
-  }
-
+  // If Gemini extraction was not available or returned empty, perform offline rule-based extraction
   const validated = validateAndExtractMedicine(extractedRawText);
   let matchedRecord = null;
-  if (validated.identifiedName) {
-    matchedRecord = findMedicineRecord(validated.identifiedName);
+  const candidateName = aiStructured?.genericName || aiStructured?.brandName || validated.identifiedName;
+  if (candidateName) {
+    matchedRecord = findMedicineRecord(candidateName);
   }
 
+  const brandName = aiStructured?.brandName || validated.brandName || matchedRecord?.brandNames[0] || null;
+  const genericName = aiStructured?.genericName || validated.genericName || matchedRecord?.genericName || null;
+  const activeIngredients = (aiStructured?.activeIngredients && aiStructured.activeIngredients.length > 0)
+    ? aiStructured.activeIngredients
+    : (validated.activeIngredients && validated.activeIngredients.length > 0)
+      ? validated.activeIngredients
+      : (matchedRecord?.activeIngredients || (genericName ? [genericName] : []));
+  const composition = aiStructured?.composition || validated.composition || matchedRecord?.composition || null;
+  const strength = aiStructured?.strength || validated.strength || validated.dosage || matchedRecord?.approvedDosages[0] || null;
+  const dosageForm = aiStructured?.dosageForm || validated.dosageForm || matchedRecord?.dosageForms[0] || null;
+  const manufacturer = aiStructured?.manufacturer || validated.manufacturer || null;
+  const expiryDate = aiStructured?.expiryDate || validated.expiryDate || null;
+
+  // Compute final certainty score
+  let confidenceScore = aiStructured?.confidenceScore !== undefined
+    ? Number(aiStructured.confidenceScore)
+    : validated.confidenceScore;
+
+  if (matchedRecord) {
+    confidenceScore = Math.max(confidenceScore, 0.94);
+  }
+
+  const isCertain = (aiStructured?.isCertain !== undefined ? Boolean(aiStructured.isCertain) : validated.isCertain) &&
+    confidenceScore >= 0.75 &&
+    Boolean(matchedRecord || genericName || brandName);
+
+  const uncertaintyReason = !isCertain
+    ? (aiStructured?.uncertaintyReason || validated.uncertaintyReason || 'Medicine active chemical name or strength could not be verified with high certainty. Please confirm the medicine name before proceeding.')
+    : undefined;
+
   return {
-    rawExtractedText: validated.rawText,
-    identifiedName: matchedRecord ? matchedRecord.medicineName : validated.identifiedName,
-    dosage: validated.dosage || matchedRecord?.approvedDosages[0] || null,
-    dosageForm: validated.dosageForm || matchedRecord?.dosageForms[0] || null,
-    confidenceScore: matchedRecord ? Math.max(validated.confidenceScore, 0.92) : validated.confidenceScore,
-    isCertain: matchedRecord ? true : validated.isCertain,
+    rawExtractedText: extractedRawText || validated.rawText,
+    identifiedName: matchedRecord ? matchedRecord.medicineName : (brandName || genericName || validated.identifiedName),
+    brandName,
+    genericName,
+    activeIngredients,
+    composition,
+    strength,
+    dosage: strength,
+    dosageForm,
+    manufacturer,
+    expiryDate,
+    confidenceScore: Math.round(confidenceScore * 100) / 100,
+    isCertain,
     rejectionReason: validated.rejectionReason,
+    uncertaintyReason,
     candidateTokens: validated.candidateTokens,
     matchedRecord
   };

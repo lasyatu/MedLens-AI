@@ -36,11 +36,17 @@ interface MedicineScannerProps {
   onScanComplete: (result: {
     rawText: string;
     confirmedMedicine: string;
-    genericName?: string;
-    dosage?: string;
-    dosageForm?: string;
+    genericName?: string | null;
+    brandName?: string | null;
+    activeIngredients?: string[];
+    composition?: string | null;
+    dosage?: string | null;
+    strength?: string | null;
+    dosageForm?: string | null;
+    manufacturer?: string | null;
+    expiryDate?: string | null;
     confidenceScore: number;
-    jurisdiction?: string;
+    jurisdiction?: string | null;
     preprocessedImageBase64?: string;
   }) => void;
   language: SupportedLanguage;
@@ -60,6 +66,7 @@ export const MedicineScanner: React.FC<MedicineScannerProps> = ({
   const [showPreprocessedView, setShowPreprocessedView] = useState(false);
   const [showUncertaintyModal, setShowUncertaintyModal] = useState(false);
   const [manualConfirmName, setManualConfirmName] = useState('');
+  const [manualConfirmStrength, setManualConfirmStrength] = useState('');
   const [showPhotoGuide, setShowPhotoGuide] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -103,11 +110,41 @@ export const MedicineScanner: React.FC<MedicineScannerProps> = ({
       text: 'CETIRIZINE HYDROCHLORIDE TABLETS IP 10 MG\nBrand: Zyrtec / Cetzine\nSecond-generation H1-antihistamine for seasonal rhinitis.\nWarning: May cause somnolence.',
       imageLabel: 'Cetirizine 10mg Blister Strip'
     },
+    aspirin: {
+      name: 'Aspirin',
+      dosage: '75 mg',
+      text: 'ECOSPRIN 75 GASTRO-RESISTANT TABLETS IP\nBrand: Ecosprin 75\nComposition: Acetylsalicylic Acid IP 75mg\nMfg by: USV Private Ltd\nExp: 08/2027 Batch: ES-9941\nWarning: Antiplatelet medicine. Consult physician before use.',
+      imageLabel: 'Ecosprin 75mg Gastro-Resistant Strip'
+    },
+    atorvastatin: {
+      name: 'Atorvastatin',
+      dosage: '10 mg',
+      text: 'ATORVASTATIN TABLETS IP 10 MG\nBrand: Lipitor / Atorva 10\nActive Ingredient: Atorvastatin Calcium 10mg\nSchedule H Prescription Drug\nExp: 11/2027\nWarning: Report unexplained muscle pain immediately.',
+      imageLabel: 'Atorvastatin 10mg Film-Coated Strip'
+    },
+    azithromycin: {
+      name: 'Azithromycin',
+      dosage: '500 mg',
+      text: 'AZITHROMYCIN TABLETS IP 500 MG\nBrand: Azee 500 / Zithromax\nEach tablet contains: Azithromycin Dihydrate 500mg\nExp: 03/2028\nWarning: Complete 3-day prescribed course.',
+      imageLabel: 'Azithromycin 500mg 3-Day Blister Strip'
+    },
+    pantoprazole: {
+      name: 'Pantoprazole',
+      dosage: '40 mg',
+      text: 'PANTOPRAZOLE GASTRO-RESISTANT TABLETS IP 40 MG\nBrand: Pantocid 40 / Protonix\nActive: Pantoprazole Sodium 40mg\nExp: 05/2027\nTake 30 minutes before breakfast.',
+      imageLabel: 'Pantoprazole 40mg Strip'
+    },
     generic_uncertain: {
       name: 'Unclear Packaging',
       dosage: '500 mg',
       text: 'TABLETS IP 500 MG\nSTORE IN A COOL DRY PLACE\nKEEP OUT OF REACH OF CHILDREN\nEXPIRY: 12/2026',
-      imageLabel: 'Generic Packaging with Missing Drug Name'
+      imageLabel: 'Generic Packaging with Missing Drug Name (Test Uncertainty)'
+    },
+    blurry_prescription: {
+      name: 'Blurry Prescription',
+      dosage: '500 mg',
+      text: 'Rx Clinic Dr. S. Rao\nDate: 2026-05-12\nCap. .m.x.. 500 .. sig illegible\nSignature: Dr. SR (Partially unverified)',
+      imageLabel: 'Blurry Prescription Note (Test Low Confidence)'
     }
   };
 
@@ -259,18 +296,27 @@ export const MedicineScanner: React.FC<MedicineScannerProps> = ({
       setOcrResult({
         rawText: data.rawExtractedText || '',
         identifiedName: data.identifiedName || null,
-        confidenceScore: data.confidenceScore || 0,
-        isCertain: data.isCertain || false,
+        brandName: data.brandName || null,
+        genericName: data.genericName || null,
+        activeIngredients: data.activeIngredients || [],
+        composition: data.composition || null,
+        strength: data.strength || data.dosage || null,
         dosage: data.dosage || null,
         dosageForm: data.dosageForm || null,
+        manufacturer: data.manufacturer || null,
+        expiryDate: data.expiryDate || null,
+        confidenceScore: data.confidenceScore || 0,
+        isCertain: data.isCertain || false,
         rejectionReason: data.rejectionReason,
+        uncertaintyReason: data.uncertaintyReason,
         candidateTokens: data.candidateTokens || []
       });
 
-      // If uncertain or generic words rejected, open verification modal
-      if (!data.identifiedName || !data.isCertain || data.confidenceScore < 0.7) {
+      // If uncertain or generic words rejected or low confidence, prompt user to confirm
+      if (!data.identifiedName || !data.isCertain || (data.confidenceScore && data.confidenceScore < 0.75)) {
         setShowUncertaintyModal(true);
         setManualConfirmName(data.identifiedName || '');
+        setManualConfirmStrength(data.strength || data.dosage || '');
       }
     } catch (err) {
       console.error('OCR Extraction error:', err);
@@ -279,8 +325,8 @@ export const MedicineScanner: React.FC<MedicineScannerProps> = ({
     }
   };
 
-  // Confirm medicine identity and proceed to RAG results
-  const handleConfirmAndProceed = (finalName: string) => {
+  // Confirm medicine identity and proceed to verified monograph results
+  const handleConfirmAndProceed = (finalName: string, finalStrength?: string) => {
     if (!ocrResult && !finalName) return;
 
     const medName = finalName.trim() || ocrResult?.identifiedName || 'Paracetamol';
@@ -292,13 +338,21 @@ export const MedicineScanner: React.FC<MedicineScannerProps> = ({
 
     setShowUncertaintyModal(false);
 
+    const chosenStrength = finalStrength?.trim() || ocrResult?.strength || ocrResult?.dosage || matched?.approvedDosages[0];
+
     onScanComplete({
       rawText: ocrResult?.rawText || 'Packaging OCR Text',
       confirmedMedicine: matched ? matched.medicineName : medName,
-      genericName: matched?.genericName,
-      dosage: ocrResult?.dosage || matched?.approvedDosages[0],
+      genericName: matched?.genericName || ocrResult?.genericName,
+      brandName: matched?.brandNames[0] || ocrResult?.brandName,
+      activeIngredients: matched?.activeIngredients || ocrResult?.activeIngredients,
+      composition: matched?.composition || ocrResult?.composition,
+      dosage: chosenStrength,
+      strength: chosenStrength,
       dosageForm: ocrResult?.dosageForm || matched?.dosageForms[0],
-      confidenceScore: ocrResult?.confidenceScore || 0.9,
+      manufacturer: ocrResult?.manufacturer,
+      expiryDate: ocrResult?.expiryDate,
+      confidenceScore: ocrResult?.confidenceScore || (matched ? 0.95 : 0.8),
       jurisdiction: matched?.primaryJurisdiction || 'United States (FDA)',
       preprocessedImageBase64: canvasRef.current ? canvasRef.current.toDataURL('image/jpeg', 0.8) : selectedImage || undefined
     });
@@ -332,11 +386,16 @@ export const MedicineScanner: React.FC<MedicineScannerProps> = ({
           {[
             { id: 'paracetamol', label: 'Paracetamol 500mg' },
             { id: 'amoxicillin', label: 'Amoxicillin 500mg' },
-            { id: 'ibuprofen', label: 'Ibuprofen 200mg' },
-            { id: 'metformin', label: 'Metformin 500mg' },
+            { id: 'ibuprofen', label: 'Ibuprofen 200mg (Boxed Warning)' },
+            { id: 'metformin', label: 'Metformin 500mg (Boxed Warning)' },
             { id: 'omeprazole', label: 'Omeprazole 20mg' },
             { id: 'cetirizine', label: 'Cetirizine 10mg' },
-            { id: 'generic_uncertain', label: '⚠️ Unclear Generic Label (Test Uncertainty)' }
+            { id: 'aspirin', label: 'Aspirin 75mg' },
+            { id: 'atorvastatin', label: 'Atorvastatin 10mg' },
+            { id: 'azithromycin', label: 'Azithromycin 500mg' },
+            { id: 'pantoprazole', label: 'Pantoprazole 40mg' },
+            { id: 'generic_uncertain', label: '⚠️ Unclear Generic Label (Test Uncertainty)' },
+            { id: 'blurry_prescription', label: '⚠️ Blurry Prescription (Test Low Confidence)' }
           ].map(p => (
             <button
               key={p.id}
@@ -795,70 +854,144 @@ export const MedicineScanner: React.FC<MedicineScannerProps> = ({
         </div>
       </div>
 
-      {/* Uncertainty & Manual Confirmation Modal */}
+      {/* Uncertainty & Identity Confirmation Modal */}
       {showUncertaintyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
-            <div className="flex items-center gap-3 text-amber-600">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 sm:p-7 space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center gap-3 text-amber-600 border-b border-slate-100 pb-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-900 text-base">{t.uncertainIdentityTitle}</h3>
+                <h3 className="font-extrabold text-slate-900 text-base">Medicine Identity Confirmation Required</h3>
                 <p className="text-xs text-slate-500">Anti-hallucination medicine validation</p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              {t.uncertainIdentityMsg}
-            </p>
+            {/* Explanation of uncertainty */}
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 space-y-1.5">
+              <span className="font-bold block">
+                {ocrResult?.isCertain === false
+                  ? '⚠️ Confidence is below clinical verification threshold'
+                  : '⚠️ Active Medicine Name Ambiguity Detected'}
+              </span>
+              <p className="leading-relaxed">
+                {ocrResult?.uncertaintyReason ||
+                  ocrResult?.rejectionReason ||
+                  'The scanned label does not clearly show an unmistakable active chemical or brand name. To protect patient safety, MedLens AI does not guess or invent medication identities.'}
+              </p>
+              {ocrResult?.dosage && (
+                <p className="text-amber-800 font-medium pt-1">
+                  Detected strength on label: <strong>{ocrResult.dosage}</strong>
+                  {ocrResult.dosageForm && ` • Formulation: ${ocrResult.dosageForm}`}
+                </p>
+              )}
+            </div>
 
-            {/* Quick Match Candidates */}
-            <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                {t.confirmMedicinePrompt}
+            {/* Photo Capture Guidance Tips */}
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-1">
+              <span className="font-bold text-slate-900 block flex items-center gap-1.5">
+                <Camera className="w-4 h-4 text-teal-600" />
+                Tips for a clearer photo:
+              </span>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-600">
+                <li>Lay the blister pack or bottle flat on an evenly lit surface.</li>
+                <li>Avoid shiny light reflections or glare directly over the printed drug name.</li>
+                <li>Frame the active ingredient chemical name and strength (e.g., 500 mg) in sharp focus.</li>
+              </ul>
+            </div>
+
+            {/* Confirm or Select Medicine Identity */}
+            <div className="space-y-3 pt-1">
+              <label className="text-xs font-bold text-slate-800 block">
+                Select or confirm the exact medicine you have:
               </label>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {AUTHORITATIVE_MEDICINES.slice(0, 4).map(m => (
+
+              {/* Quick Select Chips */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {AUTHORITATIVE_MEDICINES.slice(0, 6).map(m => (
                   <button
                     key={m.id}
+                    type="button"
                     onClick={() => {
                       setManualConfirmName(m.medicineName);
+                      if (!manualConfirmStrength) {
+                        setManualConfirmStrength(m.approvedDosages[0]);
+                      }
                     }}
-                    className={`p-2 text-left rounded-lg text-xs font-semibold border transition-all ${
+                    className={`p-2.5 text-left rounded-xl text-xs font-bold border transition-all ${
                       manualConfirmName === m.medicineName
-                        ? 'border-teal-600 bg-teal-50 text-teal-800'
-                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                        ? 'border-teal-600 bg-teal-50 text-teal-900 ring-1 ring-teal-600'
+                        : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
                     }`}
                   >
-                    {m.medicineName}
+                    <span className="block truncate">{m.medicineName.split('/')[0]}</span>
+                    <span className="text-[10px] text-slate-400 font-normal block">{m.approvedDosages[0]}</span>
                   </button>
                 ))}
               </div>
 
-              <input
-                type="text"
-                value={manualConfirmName}
-                onChange={(e) => setManualConfirmName(e.target.value)}
-                placeholder="Or type medicine name (e.g., Paracetamol, Amoxicillin)..."
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-              />
+              {/* Manual Input Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                    Medicine / Generic Name:
+                  </label>
+                  <input
+                    type="text"
+                    value={manualConfirmName}
+                    onChange={(e) => setManualConfirmName(e.target.value)}
+                    placeholder="e.g. Paracetamol, Amoxicillin, Ibuprofen..."
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                    Strength / Dose:
+                  </label>
+                  <input
+                    type="text"
+                    value={manualConfirmStrength}
+                    onChange={(e) => setManualConfirmStrength(e.target.value)}
+                    placeholder="e.g. 500 mg"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-3 border-t border-slate-100">
               <button
-                onClick={() => setShowUncertaintyModal(false)}
-                className="px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                type="button"
+                onClick={() => {
+                  setShowUncertaintyModal(false);
+                  fileInputRef.current?.click();
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
               >
-                Cancel / Re-upload
+                <Camera className="w-4 h-4 text-teal-600" />
+                Provide Clearer Image / Retake
               </button>
-              <button
-                onClick={() => handleConfirmAndProceed(manualConfirmName)}
-                disabled={!manualConfirmName.trim()}
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm"
-              >
-                Confirm & Proceed
-              </button>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowUncertaintyModal(false)}
+                  className="px-3 py-2.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConfirmAndProceed(manualConfirmName, manualConfirmStrength)}
+                  disabled={!manualConfirmName.trim()}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
+                >
+                  Confirm Identity & Proceed
+                </button>
+              </div>
             </div>
           </div>
         </div>
